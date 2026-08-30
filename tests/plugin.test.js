@@ -1,10 +1,12 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
 const source=fs.readFileSync(__dirname+'/../local.reddit.home/plugin.js','utf8');
 const factory=(x={})=>Object.assign({},x);
-const c={site:'https://oauth.reddit.com',feed_sort:'New',top_period:'Day',include_nsfw:'off',include_subreddit:'on',include_flair:'on',initial_history:'100',Identity:{createWithName:name=>factory({name})},Annotation:{createWithText:text=>factory({text})},Item:{createWithUriDate:(uri,date)=>factory({uri,date})},MediaAttachment:{createWithUrl:url=>factory({url})},LinkAttachment:{createWithUrl:url=>factory({url})},getItem:()=>null,setItem(){},processResults(){},processError:e=>{throw e},processVerification(){},raiseCondition(){},sendRequest:()=>Promise.reject(Error('network disabled')),Promise,Error,Date,JSON,Math,String,Array,parseInt,isNaN,encodeURIComponent,encodeURI};
+const c={private_feed_url:'https://www.reddit.com/.json?feed=SECRET&user=test',feed_name:'Reddit Home',include_nsfw:'off',include_subreddit:'on',include_flair:'on',initial_history:'100',Identity:{createWithName:name=>factory({name})},Annotation:{createWithText:text=>factory({text})},Item:{createWithUriDate:(uri,date)=>factory({uri,date})},MediaAttachment:{createWithUrl:url=>factory({url})},LinkAttachment:{createWithUrl:url=>factory({url})},getItem:()=>null,setItem(){},processResults(){},processError:e=>{throw e},processVerification(){},sendRequest:()=>Promise.reject(Error('network disabled')),Promise,Error,Date,JSON,Math,String,Array,RegExp,parseInt,isNaN,encodeURIComponent,encodeURI};
 vm.createContext(c);vm.runInContext(source,c);
-assert.equal(c.normalizedSort('Best'),'best');assert.equal(c.normalizedSort('x'),'new');assert.equal(c.normalizedTopPeriod('Month'),'month');assert.equal(c.listingUrl(null),'https://oauth.reddit.com/new?limit=100&raw_json=1');
-c.feed_sort='Top';c.top_period='Week';assert.equal(c.listingUrl('t3_abc'),'https://oauth.reddit.com/top?limit=100&raw_json=1&t=week&after=t3_abc');
+assert.equal(c.normalizedPrivateUrl(),'https://www.reddit.com/.json?feed=SECRET&user=test');
+assert.equal(c.listingPageUrl(c.private_feed_url,null),'https://www.reddit.com/.json?feed=SECRET&user=test&raw_json=1&limit=100');
+assert.equal(c.listingPageUrl(c.private_feed_url,'t3_abc'),'https://www.reddit.com/.json?feed=SECRET&user=test&raw_json=1&limit=100&after=t3_abc');
 const post={id:'abc',name:'t3_abc',title:'Example',author:'alice',created_utc:1700000000,permalink:'/r/test/comments/abc/example/',subreddit:'test',subreddit_name_prefixed:'r/test',selftext_html:'&lt;p&gt;Hello&lt;/p&gt;',score:1234,num_comments:56,is_self:true,over_18:false,link_flair_text:'News'};
 const item=c.itemForData(post);assert.equal(item.title,'Example');assert.equal(item.author.name,'u/alice');assert.equal(item.annotations[0].text,'r/test');assert.ok(item.body.includes('1.2k points'));
+c.private_feed_url='http://evil.example/feed';assert.throws(()=>c.normalizedPrivateUrl(),/HTTPS reddit.com/);
 console.log('plugin tests passed');
