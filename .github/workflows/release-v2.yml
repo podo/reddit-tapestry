@@ -1,0 +1,68 @@
+name: Build and release v2.0.0
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/release-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Verify version
+        run: |
+          test "$(cat VERSION)" = "2.0.0"
+          grep -q '"version": 2' local.reddit.home/plugin-config.json
+
+      - name: Run tests
+        run: node tests/plugin.test.js
+
+      - name: Build installable connector
+        run: ./scripts/build.sh
+
+      - name: Validate package
+        run: |
+          unzip -t RedditHome.tapestry
+          rm -rf /tmp/reddit-package
+          mkdir -p /tmp/reddit-package
+          unzip -q RedditHome.tapestry -d /tmp/reddit-package
+          test -f /tmp/reddit-package/plugin-config.json
+          test -f /tmp/reddit-package/ui-config.json
+          test -f /tmp/reddit-package/plugin.js
+          test -f /tmp/reddit-package/README.md
+          grep -q '"version": 2' /tmp/reddit-package/plugin-config.json
+          grep -q 'Private Reddit JSON URL' /tmp/reddit-package/ui-config.json
+          ! grep -q 'oauth_authorize' /tmp/reddit-package/plugin-config.json
+
+      - name: Commit rebuilt package
+        run: |
+          if ! git diff --quiet -- RedditHome.tapestry; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add RedditHome.tapestry
+            git commit -m "Build RedditHome.tapestry v2.0.0 [skip ci]"
+            git push origin HEAD:main
+          fi
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view v2.0.0 >/dev/null 2>&1; then
+            gh release upload v2.0.0 RedditHome.tapestry --clobber
+          else
+            gh release create v2.0.0 RedditHome.tapestry \
+              --target main \
+              --title "v2.0.0 — Private Reddit Feeds" \
+              --notes "Redesigns the connector around Reddit's private JSON feeds. No Reddit OAuth app or Data API approval is required. Paste a private JSON URL from reddit.com/prefs/feeds into Tapestry. Includes rich Reddit rendering, pagination, NSFW/spoiler handling, subreddit/flair annotations, galleries, Reddit video, external links, crossposts, and a rebuilt installable RedditHome.tapestry package. Treat private feed URLs as credentials."
+          fi
