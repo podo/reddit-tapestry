@@ -1,4 +1,4 @@
-# Reddit Private Feed connector
+# Reddit - Private Feed connector
 
 Personal Reddit feed connector for Tapestry using Reddit's private JSON feed URLs.
 
@@ -6,9 +6,9 @@ Personal Reddit feed connector for Tapestry using Reddit's private JSON feed URL
 
 1. While signed into Reddit, open `https://www.reddit.com/prefs/feeds`.
 2. Under **private listings**, copy the **JSON** URL next to **your front page** (or another private listing).
-3. In Tapestry, add **Reddit Private Feed**.
+3. In Tapestry, add **Reddit - Private Feed**.
 4. Paste the URL into **Private Reddit JSON URL**.
-5. Optionally give the source a name such as `Reddit Home` or `Reddit Saved`.
+5. Optionally give the source a name such as `Reddit - Home` or `Reddit - Saved`.
 
 Treat the URL as a password: it contains a private feed token. Do not publish it or commit it to this repository. Reddit notes that changing your password invalidates private feed URLs.
 

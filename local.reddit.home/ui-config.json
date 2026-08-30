@@ -1,7 +1,7 @@
 {
   "inputs": [
     {"name":"private_feed_url","type":"url","prompt":"Private Reddit JSON URL","placeholder":"Paste the JSON URL from reddit.com/prefs/feeds","validate_as":"url"},
-    {"name":"feed_name","type":"text","prompt":"Feed Name (optional)","placeholder":"Reddit Home"},
+    {"name":"feed_name","type":"text","prompt":"Feed Name (optional)","placeholder":"Reddit - Private Feed"},
     {"name":"include_nsfw","type":"switch","prompt":"Include NSFW Posts","value":"off"},
     {"name":"include_subreddit","type":"switch","prompt":"Show Subreddit Annotation","value":"on"},
     {"name":"include_flair","type":"switch","prompt":"Show Flair Annotation","value":"on"},

@@ -11,7 +11,7 @@ function verify() {
   requestListing(url).then((listing) => {
     if (!Array.isArray(listing?.data?.children)) throw Error("This URL did not return a Reddit listing. Copy the JSON link, not the RSS link.");
     const name = cleanFeedName();
-    processVerification({ displayName: name || "Reddit Private Feed", icon: REDDIT_ICON, baseUrl: REDDIT_WEB });
+    processVerification({ displayName: name || "Reddit - Private Feed", icon: REDDIT_ICON, baseUrl: REDDIT_WEB });
   }).catch(processError);
 }
 
@@ -37,7 +37,9 @@ function load() {
 }
 
 function normalizedPrivateUrl() {
-  let value = (private_feed_url || "").trim();
+  const configuredUrl = typeof private_feed_url === "string" ? private_feed_url.trim() : "";
+  const siteUrl = typeof site === "string" ? site.trim() : "";
+  const value = configuredUrl || siteUrl;
   if (!value) return "";
   if (!/^https:\/\/(www\.)?reddit\.com\//i.test(value)) throw Error("For safety, the private feed URL must be an HTTPS reddit.com URL.");
   return value;

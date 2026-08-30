@@ -1,4 +1,4 @@
-# Reddit Private Feed for Tapestry
+# Reddit - Private Feed for Tapestry
 
 A private-feed connector that brings your personalized Reddit listings into [Tapestry](https://usetapestry.com/) without a Reddit OAuth application.
 

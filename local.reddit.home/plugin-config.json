@@ -1,6 +1,6 @@
 {
   "id": "local.reddit.home",
-  "display_name": "Reddit Private Feed",
+  "display_name": "Reddit - Private Feed",
   "service_name": "Reddit",
   "default_color": "coral",
   "icon": "https://www.redditstatic.com/desktop2x/img/favicon/apple-icon-180x180.png",

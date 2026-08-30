@@ -1,4 +1,4 @@
-name: Build and release v2.0.0
+name: Build and release Reddit connector
 
 on:
   push:
@@ -21,7 +21,7 @@ jobs:
 
       - name: Verify version
         run: |
-          test "$(cat VERSION)" = "2.0.0"
+          grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' VERSION
           grep -q '"version": 2' local.reddit.home/plugin-config.json
 
       - name: Run tests
@@ -50,7 +50,7 @@ jobs:
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add RedditHome.tapestry
-            git commit -m "Build RedditHome.tapestry v2.0.0 [skip ci]"
+            git commit -m "Build RedditHome.tapestry v$(cat VERSION) [skip ci]"
             git push origin HEAD:main
           fi
 
@@ -58,11 +58,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if gh release view v2.0.0 >/dev/null 2>&1; then
-            gh release upload v2.0.0 RedditHome.tapestry --clobber
+          version="$(cat VERSION)"
+          tag="v$version"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" RedditHome.tapestry --clobber
           else
-            gh release create v2.0.0 RedditHome.tapestry \
+            gh release create "$tag" RedditHome.tapestry \
               --target main \
-              --title "v2.0.0 — Private Reddit Feeds" \
-              --notes "Redesigns the connector around Reddit's private JSON feeds. No Reddit OAuth app or Data API approval is required. Paste a private JSON URL from reddit.com/prefs/feeds into Tapestry. Includes rich Reddit rendering, pagination, NSFW/spoiler handling, subreddit/flair annotations, galleries, Reddit video, external links, crossposts, and a rebuilt installable RedditHome.tapestry package. Treat private feed URLs as credentials."
+              --title "$tag — Reddit - Private Feed" \
+              --notes "Fixes Tapestry Site-field verification for private Reddit JSON feeds and updates the connector name to Reddit - Private Feed. Paste a private JSON URL from reddit.com/prefs/feeds into Tapestry. Treat private feed URLs as credentials."
           fi
