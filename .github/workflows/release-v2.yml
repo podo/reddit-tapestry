@@ -2,10 +2,7 @@ name: Build and release Reddit connector
 
 on:
   push:
-    branches: [main]
-    paths:
-      - '.github/workflows/release-v2.yml'
-  workflow_dispatch:
+    tags: ['v*']
 
 permissions:
   contents: write
@@ -21,8 +18,15 @@ jobs:
 
       - name: Verify version
         run: |
-          grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' VERSION
-          grep -q '"version": 2' local.reddit.home/plugin-config.json
+          release_version="$(cat VERSION)"
+          test "$GITHUB_REF_NAME" = "v$release_version"
+          connector_version="$(jq -r '.version' local.reddit.home/plugin-config.json)"
+          test "$connector_version" -ge 1
+          previous_tag="$(git tag --merged HEAD --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | grep -Fvx "$GITHUB_REF_NAME" | head -n 1 || true)"
+          if [ -n "$previous_tag" ]; then
+            previous_connector_version="$(git show "$previous_tag:local.reddit.home/plugin-config.json" | jq -r '.version')"
+            test "$connector_version" -gt "$previous_connector_version"
+          fi
 
       - name: Run tests
         run: node tests/plugin.test.js
@@ -40,31 +44,22 @@ jobs:
           test -f /tmp/reddit-package/ui-config.json
           test -f /tmp/reddit-package/plugin.js
           test -f /tmp/reddit-package/README.md
-          grep -q '"version": 2' /tmp/reddit-package/plugin-config.json
-          grep -q 'Private Reddit JSON URL' /tmp/reddit-package/ui-config.json
+          connector_version="$(jq -r '.version' local.reddit.home/plugin-config.json)"
+          test "$(jq -r '.version' /tmp/reddit-package/plugin-config.json)" = "$connector_version"
+          grep -q '"site_prompt": "Private Reddit JSON URL"' /tmp/reddit-package/plugin-config.json
+          ! grep -q '"private_feed_url"' /tmp/reddit-package/ui-config.json
           ! grep -q 'oauth_authorize' /tmp/reddit-package/plugin-config.json
-
-      - name: Commit rebuilt package
-        run: |
-          if ! git diff --quiet -- RedditHome.tapestry; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add RedditHome.tapestry
-            git commit -m "Build RedditHome.tapestry v$(cat VERSION) [skip ci]"
-            git push origin HEAD:main
-          fi
 
       - name: Create GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          version="$(cat VERSION)"
-          tag="v$version"
+          tag="$GITHUB_REF_NAME"
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" RedditHome.tapestry --clobber
           else
             gh release create "$tag" RedditHome.tapestry \
-              --target main \
+              --target "$tag" \
               --title "$tag — Reddit - Private Feed" \
-              --notes "Fixes Tapestry Site-field verification for private Reddit JSON feeds and updates the connector name to Reddit - Private Feed. Paste a private JSON URL from reddit.com/prefs/feeds into Tapestry. Treat private feed URLs as credentials."
+              --notes "Uses Tapestry's standard Site field for Reddit private JSON URLs, improves HTTP diagnostics and refresh behavior, and updates connector metadata for reliable upgrades. Treat private feed URLs as credentials."
           fi

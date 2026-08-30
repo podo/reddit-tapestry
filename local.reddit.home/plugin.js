@@ -6,9 +6,11 @@ const REDDIT_ICON = "https://www.redditstatic.com/desktop2x/img/favicon/apple-ic
 const PAGE_SIZE = 100;
 
 function verify() {
-  const url = normalizedPrivateUrl();
+  let url;
+  try { url = normalizedPrivateUrl(); }
+  catch (error) { processError(error); return; }
   if (!url) { processError(Error("Paste the private JSON URL from Reddit's RSS feeds page.")); return; }
-  requestListing(url).then((listing) => {
+  requestListing(listingPageUrl(url, null)).then((listing) => {
     if (!Array.isArray(listing?.data?.children)) throw Error("This URL did not return a Reddit listing. Copy the JSON link, not the RSS link.");
     const name = cleanFeedName();
     processVerification({ displayName: name || "Reddit - Private Feed", icon: REDDIT_ICON, baseUrl: REDDIT_WEB });
@@ -18,49 +20,81 @@ function verify() {
 function load() {
   const historyCount = clampInt(initial_history, 100, 300, 100);
   const firstLoad = getItem("reddit_private_initialized_v2") !== "1";
-  const pages = firstLoad ? Math.max(1, Math.ceil(historyCount / PAGE_SIZE)) : 1;
-  fetchListingPages(normalizedPrivateUrl(), pages).then((children) => {
-    const results = [];
-    const seen = {};
-    for (const child of children) {
-      const data = child?.data;
-      if (!data || child?.kind === "more") continue;
-      if (include_nsfw !== "on" && data.over_18 === true) continue;
-      const key = data.name || data.id || data.permalink;
-      if (seen[key]) continue;
-      const result = itemForData(data);
-      if (result) { seen[key] = true; results.push(result); }
-    }
+  let url;
+  try { url = normalizedPrivateUrl(); }
+  catch (error) { processError(error); return; }
+  if (!url) { processError(Error("Paste the private JSON URL from Reddit's RSS feeds page.")); return; }
+  const pageLimit = firstLoad ? Math.max(1, Math.min(5, Math.ceil(historyCount / PAGE_SIZE) + 2)) : 1;
+  fetchListingPages(url, pageLimit, !firstLoad, historyCount).then((children) => {
+    if (children === null) { processResults(null, true); return; }
+    const results = itemsForChildren(children, historyCount);
     setItem("reddit_private_initialized_v2", "1");
     processResults(results, true);
   }).catch(processError);
 }
 
 function normalizedPrivateUrl() {
-  const configuredUrl = typeof private_feed_url === "string" ? private_feed_url.trim() : "";
   const siteUrl = typeof site === "string" ? site.trim() : "";
-  const value = configuredUrl || siteUrl;
+  const legacyUrl = typeof private_feed_url === "string" ? private_feed_url.trim() : "";
+  const value = siteUrl || legacyUrl;
   if (!value) return "";
-  if (!/^https:\/\/(www\.)?reddit\.com\//i.test(value)) throw Error("For safety, the private feed URL must be an HTTPS reddit.com URL.");
+  if (!/^https:\/\/(www\.)?reddit\.com\/\.json(?:[?#]|$)/i.test(value)) throw Error("Paste an HTTPS private JSON URL from reddit.com/prefs/feeds.");
+  if (!/(?:[?&])feed=[^&]+/i.test(value)) throw Error("This Reddit URL is missing its private feed token.");
   return value;
 }
 
-function cleanFeedName() { return (feed_name || "").trim(); }
+function cleanFeedName() { return typeof feed_name === "string" ? feed_name.trim() : ""; }
 
-function fetchListingPages(baseUrl, pageCount) {
+function fetchListingPages(baseUrl, pageCount, conditional, targetCount) {
   const all = [];
   function next(index, after) {
     if (index >= pageCount) return Promise.resolve(all);
     const url = listingPageUrl(baseUrl, after);
-    return requestListing(url).then((listing) => {
+    return requestListing(url, conditional && index === 0).then((listing) => {
+      if (listing === null) return null;
       const children = listing?.data?.children;
       if (!Array.isArray(children)) throw Error("Unexpected Reddit private JSON response.");
       for (const child of children) all.push(child);
       const nextAfter = listing?.data?.after;
+      if (targetCount && acceptedChildCount(all, targetCount) >= targetCount) return all;
       return nextAfter ? next(index + 1, nextAfter) : all;
     });
   }
   return next(0, null);
+}
+
+function acceptedChildCount(children, limit) {
+  const seen = {};
+  let count = 0;
+  for (const child of children) {
+    const data = child?.data;
+    if (!data || child?.kind === "more") continue;
+    if (include_nsfw !== "on" && data.over_18 === true) continue;
+    const key = data.name || data.id || data.permalink;
+    if (!key || seen[key]) continue;
+    seen[key] = true;
+    count += 1;
+    if (count >= limit) break;
+  }
+  return count;
+}
+
+function itemsForChildren(children, limit) {
+  const results = [];
+  const seen = {};
+  for (const child of children) {
+    const data = child?.data;
+    if (!data || child?.kind === "more") continue;
+    if (include_nsfw !== "on" && data.over_18 === true) continue;
+    const key = data.name || data.id || data.permalink;
+    if (!key || seen[key]) continue;
+    const result = itemForData(data);
+    if (!result) continue;
+    seen[key] = true;
+    results.push(result);
+    if (results.length >= limit) break;
+  }
+  return results;
 }
 
 function listingPageUrl(baseUrl, after) {
@@ -83,13 +117,16 @@ function setQueryParameter(url, key, value) {
   return base + hash;
 }
 
-function requestListing(url) {
-  return sendRequest(url, "GET", null, { "Accept": "application/json" }, true).then((raw) => {
+function requestListing(url, conditional) {
+  const request = conditional ? sendConditionalRequest : sendRequest;
+  return request(url, "GET", null, { "Accept": "application/json" }, true).then((raw) => {
     let response = raw;
     if (typeof response === "string") response = JSON.parse(response);
     const status = response?.status ?? 200;
     const body = response?.body ?? response;
-    if (status === 401 || status === 403) throw Error("Reddit rejected this private feed URL. Copy a fresh JSON URL from reddit.com/prefs/feeds. Private feed URLs can be invalidated by account/password changes.");
+    if (status === 304) return null;
+    if (status === 401) throw Error("Reddit rejected this private feed URL. Copy a fresh JSON URL from reddit.com/prefs/feeds.");
+    if (status === 403) throw Error("Reddit returned HTTP 403. The private URL may have expired, or Reddit may be blocking this request. Try again later or copy a fresh JSON URL.");
     if (status === 429) throw Error("Reddit rate limit reached. Try again later.");
     if (status < 200 || status >= 300) throw Error("Reddit private feed request failed with HTTP " + status + ".");
     return typeof body === "string" ? JSON.parse(body) : body;
