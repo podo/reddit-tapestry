@@ -59,7 +59,7 @@ jobs:
             gh release upload "$tag" RedditHome.tapestry --clobber
           else
             gh release create "$tag" RedditHome.tapestry \
-              --target "$tag" \
+              --target "$GITHUB_SHA" \
               --title "$tag — Reddit - Private Feed" \
               --notes "Uses Tapestry's standard Site field for Reddit private JSON URLs, improves HTTP diagnostics and refresh behavior, and updates connector metadata for reliable upgrades. Treat private feed URLs as credentials."
           fi
