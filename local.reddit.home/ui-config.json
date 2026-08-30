@@ -1,7 +1,7 @@
 {
   "inputs": [
-    {"name":"feed_sort","type":"choices","prompt":"Home Feed Sort","choices":"New,Best,Hot,Rising,Top","value":"New"},
-    {"name":"top_period","type":"choices","prompt":"Top Period (used only for Top)","choices":"Day,Week,Month,Year,All","value":"Day"},
+    {"name":"private_feed_url","type":"url","prompt":"Private Reddit JSON URL","placeholder":"Paste the JSON URL from reddit.com/prefs/feeds","validate_as":"url"},
+    {"name":"feed_name","type":"text","prompt":"Feed Name (optional)","placeholder":"Reddit Home"},
     {"name":"include_nsfw","type":"switch","prompt":"Include NSFW Posts","value":"off"},
     {"name":"include_subreddit","type":"switch","prompt":"Show Subreddit Annotation","value":"on"},
     {"name":"include_flair","type":"switch","prompt":"Show Flair Annotation","value":"on"},
