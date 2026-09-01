@@ -4,6 +4,7 @@
     {"name":"include_nsfw","type":"switch","prompt":"Include NSFW Posts","value":"off"},
     {"name":"include_subreddit","type":"switch","prompt":"Show Subreddit","value":"on"},
     {"name":"include_flair","type":"switch","prompt":"Show Flair","value":"on"},
+    {"name":"show_metrics","type":"switch","prompt":"Show Metrics","value":"on"},
     {"name":"initial_history","type":"choices","prompt":"Initial History","choices":"100,200,300","value":"100"}
   ]
 }

@@ -1,0 +1,16 @@
+{
+  "sites": [
+    "reddit.com"
+  ],
+  "url": [
+    {
+      "match": "reddit.com/prefs/feeds",
+      "variable": "site"
+    },
+    {
+      "extract": "/reddit\\.com\\/\\.json\\?([^#]+)/",
+      "variable": "site",
+      "prefix": "https://www.reddit.com/.json?"
+    }
+  ]
+}

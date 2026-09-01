@@ -1,19 +1,22 @@
 # Reddit Private Feed — item design
 
-Card chrome order (Loom `post` style):
+Card chrome order (Loom `post` style), matching X:
 
-1. Native annotations: **`{flair} in r/subreddit`** when both are shown; **`r/subreddit`** if flair is off/empty; optional separate **`Pinned`** when stickied.
-2. Service · Feed Type via verify `displayName` (`Reddit · Private Feed`, or `Reddit · {feed_name}`).
-3. Author: `u/{name}` on `item.author` (assigned last).
-4. Title → body meta (metrics in `<small>`) → selftext caption → attachments (media → link → crosspost quote).
+1. Native annotations: community context (`{flair} in r/subreddit` or `r/sub`) when enabled; optional `Pinned`. No feed-type annotation.
+2. Service chrome: `service_name` `Reddit · Private Feed` at native Service size (`default_service_name_visibility: visible`); verify `displayName` uses `feedDisplayName()`.
+3. Author: Reddit username only on `item.author.name` (no `u/` prefix or duplicate username field).
+4. Title → optional body meta (metrics in `<small>` when **Show Metrics** is on) → selftext → attachments (media → poll → link → crosspost quote) → Comments action.
 
-NSFW / Spoiler use `contentWarning` only when Reddit flags the post.
+NSFW / Spoiler use `contentWarning` only when Reddit flags the post. Flair emoji uses `item.shortcodes` from `link_flair_richtext`.
 
 Native Tapestry attachments may render under the HTML body; that is an API limitation.
 
+After upgrading, **re-verify** the feed so displayName refreshes.
+
 ## Loom done checklist
 
-- Service reads `Reddit · …`, not a bare `Reddit` with a long custom title.
-- Community context is one annotation chip (`News in r/test`), not separate sub + flair chips.
-- Metrics sit under Author before selftext; subreddit/flair are not duplicated in body.
-- Toggles still hide subreddit and/or flair.
+- No bare `Reddit` Service row; feed type is Service chrome (`Reddit · …`), not an annotation.
+- Author shows username only (no `u/` duplicate).
+- Metrics under Author before selftext when Show Metrics is on; hidden when off.
+- Comments action loads public `permalink.json` context.
+- Expired private URL (401/403) raises a disable condition asking to re-copy from prefs/feeds.

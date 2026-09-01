@@ -16,7 +16,7 @@ No Reddit OAuth application, API client ID, API secret, or Data API approval is 
 
 ## Feed behavior
 
-Cards follow Loom chrome order: community annotation (`{flair} in r/subreddit`), Service `Reddit · {Feed Type}`, author, title, metrics under author, then selftext and attachments. The connector preserves score/comment metadata, images, galleries, Reddit-hosted video, external links, spoilers, NSFW warnings and crossposts when those fields are present.
+Cards follow Loom chrome order: community annotation (`{flair} in r/subreddit`), bold feed type `**Reddit · {Feed Type}**` (Service row hidden), author, title, optional metrics under author, then selftext and attachments. Open Post and Comments actions are available. The connector preserves score/comment metadata, images, galleries, Reddit-hosted video, polls, external links, spoilers, NSFW warnings and crossposts when those fields are present.
 
 Initial history can follow Reddit's `after` cursor for up to 100, 200 or 300 items. Later refreshes request the newest page and rely on stable Reddit permalinks for Tapestry deduplication.
 

@@ -4,6 +4,8 @@
 const REDDIT_WEB = "https://www.reddit.com";
 const REDDIT_ICON = "https://www.redditstatic.com/desktop2x/img/favicon/apple-icon-180x180.png";
 const PAGE_SIZE = 100;
+const AVATAR_LOOKUP_CAP = 8;
+const connectorBuildId = "reddit-private@plugin7@2.0.6";
 
 function verify() {
   let url;
@@ -27,9 +29,78 @@ function load() {
   fetchListingPages(url, pageLimit, !firstLoad, historyCount).then((children) => {
     if (children === null) { processResults(null, true); return; }
     const results = itemsForChildren(children, historyCount);
-    setItem("reddit_private_initialized_v2", "1");
-    processResults(results, true);
+    return enrichAuthorAvatars(results).then(() => {
+      setItem("reddit_private_initialized_v2", "1");
+      processResults(results, true);
+    });
   }).catch(processError);
+}
+
+function performAction(actionId, actionValue, item) {
+  performActionAsync(actionId, actionValue, item)
+    .then((result) => actionComplete(result, null))
+    .catch((error) => actionComplete(null, error));
+}
+
+function performActionAsync(actionId, actionValue, item) {
+  if (actionId === "comments") return loadCommentContext(item, actionValue);
+  return Promise.reject(Error("Unsupported Reddit action: " + actionId));
+}
+
+function loadCommentContext(item, actionValue) {
+  let payload = {};
+  try { payload = typeof actionValue === "string" ? JSON.parse(actionValue) : (actionValue || {}); }
+  catch (error) { payload = {}; }
+  const permalink = payload.permalink || (item && item.uri) || "";
+  if (!permalink) return Promise.reject(Error("Missing post permalink for comments."));
+  const url = commentsJsonUrl(permalink);
+  return sendRequest(url, "GET", null, { "Accept": "application/json" }, true).then((raw) => {
+    let response = raw;
+    if (typeof response === "string") response = JSON.parse(response);
+    const status = response?.status ?? 200;
+    const body = response?.body ?? response;
+    if (status < 200 || status >= 300) throw Error("Reddit comments request failed with HTTP " + status + ".");
+    const json = typeof body === "string" ? JSON.parse(body) : body;
+    const commentListing = Array.isArray(json) ? json[1] : null;
+    const comments = flattenCommentChildren(commentListing?.data?.children, 0).slice(0, 40);
+    return item ? [item].concat(comments) : comments;
+  });
+}
+
+function commentsJsonUrl(permalink) {
+  let path = String(permalink);
+  if (/^https?:\/\//i.test(path)) {
+    path = path.replace(/^https?:\/\/(www\.)?reddit\.com/i, "");
+  }
+  if (path.indexOf(".json") >= 0) return absoluteRedditUrl(path) + (path.indexOf("?") >= 0 ? "&" : "?") + "raw_json=1&limit=50";
+  if (path.charAt(path.length - 1) === "/") path = path.slice(0, -1);
+  return absoluteRedditUrl(path + ".json?raw_json=1&limit=50");
+}
+
+function flattenCommentChildren(children, depth) {
+  const results = [];
+  if (!Array.isArray(children)) return results;
+  for (const child of children) {
+    if (!child || child.kind !== "t1" || !child.data) continue;
+    const data = child.data;
+    const comment = commentItemForData(data, depth);
+    if (comment) results.push(comment);
+    if (data.replies && data.replies.data && data.replies.data.children) {
+      results.push.apply(results, flattenCommentChildren(data.replies.data.children, depth + 1));
+    }
+  }
+  return results;
+}
+
+function commentItemForData(data, depth) {
+  const uri = absoluteRedditUrl(data.permalink || ("/comments/" + (data.link_id || "") + "/_/" + (data.id || "")));
+  const item = Item.createWithUriDate(uri, new Date((data.created_utc || 0) * 1000));
+  item.title = depth > 0 ? "Reply" : "Comment";
+  if (data.body_html) item.body = absolutizeRedditHtml(decodeHtmlEntities(data.body_html));
+  else if (data.body) item.body = "<p>" + escapeHtml(data.body).replace(/\n/g, "<br>") + "</p>";
+  item.author = identityForPost(data);
+  if (depth > 0) item.annotations = [Annotation.createWithText("Reply")];
+  return item;
 }
 
 function normalizedPrivateUrl() {
@@ -43,7 +114,13 @@ function normalizedPrivateUrl() {
 }
 
 function cleanFeedName() { return typeof feed_name === "string" ? feed_name.trim() : ""; }
-function sourceLabel() { return cleanFeedName() || "Private Feed"; }
+function sourceLabel() {
+  const name = cleanFeedName();
+  if (!name) return "Private Feed";
+  // Old installs saved "Reddit - Private Feed" as feed_name; don't emit "Reddit · Reddit - …".
+  const stripped = name.replace(/^reddit(\s*[·\-–—:]\s*|\s+)/i, "").trim();
+  return stripped || "Private Feed";
+}
 function feedDisplayName() { return "Reddit · " + sourceLabel(); }
 
 function fetchListingPages(baseUrl, pageCount, conditional, targetCount) {
@@ -126,8 +203,14 @@ function requestListing(url, conditional) {
     const status = response?.status ?? 200;
     const body = response?.body ?? response;
     if (status === 304) return null;
-    if (status === 401) throw Error("Reddit rejected this private feed URL. Copy a fresh JSON URL from reddit.com/prefs/feeds.");
-    if (status === 403) throw Error("Reddit returned HTTP 403. The private URL may have expired, or Reddit may be blocking this request. Try again later or copy a fresh JSON URL.");
+    if (status === 401 || status === 403) {
+      const title = "Private feed URL expired";
+      const message = "Copy a fresh JSON URL from reddit.com/prefs/feeds and update this source.";
+      if (typeof raiseCondition === "function") raiseCondition("disable", title, message);
+      throw Error(status === 401
+        ? "Reddit rejected this private feed URL. Copy a fresh JSON URL from reddit.com/prefs/feeds."
+        : "Reddit returned HTTP 403. The private URL may have expired, or Reddit may be blocking this request. Try again later or copy a fresh JSON URL.");
+    }
     if (status === 429) throw Error("Reddit rate limit reached. Try again later.");
     if (status < 200 || status >= 300) throw Error("Reddit private feed request failed with HTTP " + status + ".");
     return typeof body === "string" ? JSON.parse(body) : body;
@@ -142,20 +225,86 @@ function itemForData(item) {
   const body = htmlBodyForPost(item); if (body) result.body = body;
   const annotations = annotationsForPost(item); if (annotations.length) result.annotations = annotations;
   const attachments = attachmentsForPost(item); if (attachments.length) result.attachments = attachments;
+  const shortcodes = shortcodesForPost(item); if (shortcodes) result.shortcodes = shortcodes;
   if (item.over_18 === true) result.contentWarning = "NSFW";
   else if (item.spoiler === true) result.contentWarning = "Spoiler";
+  result.actions = actionsForPost(item, uri);
   // Assign author last — matches X/Threads Loom identity quirks.
   result.author = identityForPost(item);
   return result;
 }
 
+function actionsForPost(item, uri) {
+  return {
+    _connectorBuild: connectorBuildId,
+    comments: JSON.stringify({ permalink: uri })
+  };
+}
+
+function shortcodesForPost(item) {
+  if (!Array.isArray(item.link_flair_richtext)) return null;
+  const shortcodes = {};
+  let found = false;
+  for (const part of item.link_flair_richtext) {
+    if (part?.e !== "emoji") continue;
+    const name = typeof part.a === "string" ? part.a.replace(/^:/, "").replace(/:$/, "") : "";
+    const url = part.u;
+    if (!name || !url) continue;
+    shortcodes[name] = decodeHtmlEntities(url);
+    found = true;
+  }
+  return found ? shortcodes : null;
+}
+
 function identityForPost(item) {
   const author = item.author || "[deleted]";
-  const identity = Identity.createWithName("u/" + author);
-  identity.username = author;
-  identity.avatar = REDDIT_ICON;
+  const identity = Identity.createWithName(author);
+  identity.avatar = cachedAvatarForAuthor(author) || REDDIT_ICON;
   if (author !== "[deleted]") identity.uri = REDDIT_WEB + "/user/" + encodeURIComponent(author);
   return identity;
+}
+
+function avatarCacheKey(author) { return "reddit_avatar_v1_" + author; }
+
+function cachedAvatarForAuthor(author) {
+  if (!author || author === "[deleted]") return null;
+  const cached = getItem(avatarCacheKey(author));
+  return typeof cached === "string" && /^https?:\/\//i.test(cached) ? cached : null;
+}
+
+function enrichAuthorAvatars(items) {
+  const pending = [];
+  const seen = {};
+  for (const item of items) {
+    const author = item?.author?.username;
+    if (!author || author === "[deleted]" || seen[author] || cachedAvatarForAuthor(author)) continue;
+    seen[author] = true;
+    pending.push(author);
+    if (pending.length >= AVATAR_LOOKUP_CAP) break;
+  }
+  if (!pending.length) return Promise.resolve();
+  return Promise.all(pending.map((author) => fetchAuthorAvatar(author).then((url) => {
+    if (!url) return;
+    setItem(avatarCacheKey(author), url);
+    for (const item of items) {
+      if (item?.author?.username === author) item.author.avatar = url;
+    }
+  }))).then(() => undefined);
+}
+
+function fetchAuthorAvatar(author) {
+  const url = REDDIT_WEB + "/user/" + encodeURIComponent(author) + "/about.json?raw_json=1";
+  return sendRequest(url, "GET", null, { "Accept": "application/json" }, true).then((raw) => {
+    let response = raw;
+    if (typeof response === "string") response = JSON.parse(response);
+    const status = response?.status ?? 200;
+    const body = response?.body ?? response;
+    if (status < 200 || status >= 300) return null;
+    const json = typeof body === "string" ? JSON.parse(body) : body;
+    const data = json?.data;
+    const icon = data?.snoovatar_img || data?.icon_img;
+    return validThumbnail(icon) ? decodeHtmlEntities(icon) : null;
+  }).catch(() => null);
 }
 
 function annotationsForPost(item) {
@@ -168,11 +317,15 @@ function annotationsForPost(item) {
     a.uri = REDDIT_WEB + "/r/" + encodeURIComponent(item.subreddit || "");
     annotations.push(a);
   }
+  // Feed type uses Service chrome (service_name + verify displayName), not an annotation — matches X.
   if (item.stickied === true) annotations.push(Annotation.createWithText("Pinned"));
   return annotations;
 }
 
+function showMetrics() { return typeof show_metrics === "undefined" || show_metrics !== "off"; }
+
 function metricsMetaHtml(item) {
+  if (!showMetrics()) return "";
   const metadata = [];
   if (typeof item.score === "number") metadata.push(formatNumber(item.score) + " points");
   if (typeof item.num_comments === "number") metadata.push(formatNumber(item.num_comments) + " comments");
@@ -184,17 +337,21 @@ function metricsMetaHtml(item) {
 function htmlBodyForPost(item) {
   let html = metricsMetaHtml(item);
   if (item.selftext_html) html += absolutizeRedditHtml(decodeHtmlEntities(item.selftext_html));
+  if (html) html += "<!-- " + escapeHtml(connectorBuildId) + " -->";
   return html;
 }
 
-function attachmentsForPost(item) {
+function attachmentsForPost(item, depth) {
+  const nest = depth || 0;
   const attachments = [];
   addRedditVideo(item, attachments);
   if (!attachments.length) addGallery(item, attachments);
   if (!attachments.length) addPreviewImages(item, attachments);
   if (!attachments.length) addDirectMedia(item, attachments);
-  if (!attachments.length) addExternalLink(item, attachments);
-  if (Array.isArray(item.crosspost_parent_list) && item.crosspost_parent_list.length) {
+  addPoll(item, attachments);
+  // Link card even when media exists (X pattern); skip for self posts.
+  addExternalLink(item, attachments);
+  if (nest === 0 && Array.isArray(item.crosspost_parent_list) && item.crosspost_parent_list.length) {
     const parent = quotedItemForCrosspost(item.crosspost_parent_list[0]);
     if (parent) attachments.push(parent);
   }
@@ -219,6 +376,11 @@ function addGallery(item, attachments) {
     const a = MediaAttachment.createWithUrl(decodeHtmlEntities(url));
     a.mimeType = media?.m || (source.gif ? "image/gif" : "image");
     if (source.x && source.y) a.aspectSize = { width: source.x, height: source.y };
+    const posters = media?.p;
+    if (Array.isArray(posters) && posters.length) {
+      const poster = posters[posters.length - 1]?.u;
+      if (poster) a.thumbnail = decodeHtmlEntities(poster);
+    }
     attachments.push(a);
   }
 }
@@ -248,16 +410,38 @@ function addExternalLink(item, attachments) {
   if (item.is_self === true) return;
   const url = decodeHtmlEntities(item.url_overridden_by_dest || item.url || "");
   if (!/^https?:\/\//i.test(url) || url.indexOf("reddit.com/gallery/") >= 0 || url.indexOf("v.redd.it/") >= 0) return;
+  // Skip if this URL is already a direct media attachment.
+  for (const existing of attachments) {
+    if (existing && existing.url === url) return;
+  }
   const link = LinkAttachment.createWithUrl(url); link.title = item.title || url;
   if (item.domain) link.siteName = item.domain;
   if (validThumbnail(item.thumbnail)) link.image = decodeHtmlEntities(item.thumbnail);
   attachments.push(link);
 }
+function addPoll(item, attachments) {
+  const poll = item?.poll_data;
+  if (!poll || !Array.isArray(poll.options) || typeof PollAttachment === "undefined" || typeof PollOption === "undefined") return;
+  const options = [];
+  for (const option of poll.options) {
+    const title = option?.text || option?.title;
+    if (!title) continue;
+    const votes = typeof option.vote_count === "number" ? option.vote_count : undefined;
+    options.push(votes === undefined ? PollOption.create(title) : PollOption.create(title, votes));
+  }
+  if (!options.length) return;
+  const attachment = PollAttachment.create(options);
+  if (poll.voting_end_timestamp) attachment.endDate = new Date(poll.voting_end_timestamp);
+  attachments.push(attachment);
+}
 function quotedItemForCrosspost(parent) {
   if (!parent?.permalink) return null;
   const quote = Item.createWithUriDate(absoluteRedditUrl(parent.permalink), new Date((parent.created_utc || 0) * 1000));
-  quote.title = parent.title || "Crosspost"; quote.author = identityForPost(parent);
-  if (parent.selftext_html) quote.body = absolutizeRedditHtml(decodeHtmlEntities(parent.selftext_html));
+  quote.title = parent.title || "Crosspost";
+  const body = htmlBodyForPost(parent); if (body) quote.body = body;
+  const attachments = attachmentsForPost(parent, 1);
+  if (attachments.length) quote.attachments = attachments;
+  quote.author = identityForPost(parent);
   return quote;
 }
 function absoluteRedditUrl(path) { return /^https?:\/\//i.test(path || "") ? path : REDDIT_WEB + encodeURI(path || ""); }

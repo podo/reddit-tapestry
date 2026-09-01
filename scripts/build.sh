@@ -6,7 +6,7 @@ output_file="$project_dir/RedditHome.tapestry"
 temporary_file="$project_dir/RedditHome.tapestry.tmp"
 trap 'rm -f "$temporary_file"' EXIT
 cd "$connector_dir"
-zip -X -q "$temporary_file" plugin-config.json ui-config.json plugin.js README.md DESIGN.md
+zip -X -q "$temporary_file" plugin-config.json ui-config.json plugin.js README.md DESIGN.md actions.json apps.json discovery.json
 unzip -t "$temporary_file"
 mv "$temporary_file" "$output_file"
 echo "Built $output_file"
