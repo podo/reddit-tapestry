@@ -46,9 +46,9 @@ jobs:
           test -f /tmp/reddit-package/README.md
           connector_version="$(jq -r '.version' local.reddit.home/plugin-config.json)"
           test "$(jq -r '.version' /tmp/reddit-package/plugin-config.json)" = "$connector_version"
-          grep -q '"site_prompt": "Private Reddit JSON URL"' /tmp/reddit-package/plugin-config.json
+          grep -q '"oauth_authorize"' /tmp/reddit-package/plugin-config.json
+          grep -q '"feed_source"' /tmp/reddit-package/ui-config.json
           ! grep -q '"private_feed_url"' /tmp/reddit-package/ui-config.json
-          ! grep -q 'oauth_authorize' /tmp/reddit-package/plugin-config.json
 
       - name: Create GitHub release
         env:

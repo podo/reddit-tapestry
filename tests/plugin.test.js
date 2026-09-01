@@ -3,7 +3,7 @@ const source=fs.readFileSync(__dirname+'/../local.reddit.home/plugin.js','utf8')
 const factory=(x={})=>Object.assign({},x);
 const privateUrl='https://www.reddit.com/.json?feed=SECRET&user=test';
 const c={
-  site:privateUrl,private_feed_url:'',feed_name:'',include_nsfw:'off',include_subreddit:'on',include_flair:'on',show_metrics:'on',initial_history:'100',
+  site:privateUrl,private_feed_url:'',feed_name:'',feed_source:'home',subreddit_name:'',include_nsfw:'off',include_subreddit:'on',include_flair:'on',show_metrics:'on',initial_history:'100',
   Identity:{createWithName:name=>factory({name})},
   Annotation:{createWithText:text=>factory({text})},
   Item:{createWithUriDate:(uri,date)=>factory({uri,date})},
@@ -39,7 +39,7 @@ assert.ok(item.body.includes('<p>Hello</p>'));
 assert.ok(item.body.indexOf('reddit-meta-metrics') < item.body.indexOf('<p>Hello</p>'));
 assert.equal(item.shortcodes.fire,'https://emoji.example/fire.png');
 assert.ok(item.actions.comments);
-assert.equal(item.actions._connectorBuild,'reddit-private@plugin7@2.0.6');
+assert.equal(item.actions._connectorBuild,'reddit@plugin8@2.1.0');
 assert.equal(item.actions.openLink,undefined);
 const pinned=c.itemForData({...post,stickied:true});
 assert.equal(pinned.annotations.length,2);
@@ -62,9 +62,17 @@ assert.ok(c.itemForData(pollPost).attachments.some(a=>a.options && a.options.len
 const nsfwPost={...post,id:'nsfw',name:'t3_nsfw',over_18:true};
 assert.equal(c.acceptedChildCount([{data:post},{data:nsfwPost},{data:post}],100),1);
 assert.equal(c.itemsForChildren([{data:post},{data:nsfwPost},{data:post}],100).length,1);
-c.site='https://www.reddit.com/r/test/new.json';assert.throws(()=>c.normalizedPrivateUrl(),/private JSON URL/);
+c.site='https://www.reddit.com/r/test/new.json';assert.equal(c.normalizedPrivateUrl(),'');
+c.site='https://www.reddit.com/.json?user=test';assert.equal(c.privateFeedUrl(),'');
 c.site='';c.private_feed_url=privateUrl;assert.equal(c.normalizedPrivateUrl(),privateUrl);
 c.site=privateUrl;c.private_feed_url='https://www.reddit.com/.json?feed=OLD';assert.equal(c.normalizedPrivateUrl(),privateUrl);
+c.site='';c.private_feed_url='';c.feed_source='saved';
+assert.equal(c.usesPrivateFeedUrl(),false);
+assert.equal(c.oauthListingBaseUrl(),'https://oauth.reddit.com/user/me/saved');
+assert.equal(c.feedDisplayName(),'Reddit · Saved');
+c.feed_source='subreddit';c.subreddit_name='technology';
+assert.equal(c.oauthListingBaseUrl(),'https://oauth.reddit.com/r/technology/hot');
+assert.throws(()=>{c.subreddit_name='';c.oauthListingBaseUrl();},/subreddit name/);
 (async()=>{
   c.sendRequest=()=>Promise.resolve(JSON.stringify({status:200,body:JSON.stringify({data:{children:[]}})}));
   assert.equal((await c.requestListing(privateUrl,false)).data.children.length,0);
@@ -73,9 +81,15 @@ c.site=privateUrl;c.private_feed_url='https://www.reddit.com/.json?feed=OLD';ass
   assert.equal(await c.fetchListingPages(privateUrl,1,true,100),null);
   let raised=null;
   c.raiseCondition=(type,title,message)=>{raised={type,title,message};};
+  c.site=privateUrl;
   c.sendRequest=()=>Promise.resolve(JSON.stringify({status:403,body:''}));
   await assert.rejects(()=>c.requestListing(privateUrl,false),/HTTP 403/);
   assert.equal(raised.type,'disable');
+  c.site='';
+  c.sendRequest=()=>Promise.resolve(JSON.stringify({status:401,body:''}));
+  raised=null;
+  await assert.rejects(()=>c.requestListing('https://oauth.reddit.com/hot',false),/Sign in/);
+  assert.equal(raised.type,'authorize');
   const commentJson=[
     {data:{children:[{kind:'t3',data:post}]}},
     {data:{children:[{kind:'t1',data:{id:'c1',author:'bob',created_utc:1700000100,permalink:'/r/test/comments/abc/example/c1/',body:'Nice',body_html:'&lt;p&gt;Nice&lt;/p&gt;',replies:''}}]}}
