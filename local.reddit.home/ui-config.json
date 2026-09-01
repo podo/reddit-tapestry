@@ -1,9 +1,9 @@
 {
   "inputs": [
-    {"name":"feed_name","type":"text","prompt":"Feed Name (optional)","placeholder":"Reddit - Private Feed"},
+    {"name":"feed_name","type":"text","prompt":"Feed Type (optional)","placeholder":"Private Feed"},
     {"name":"include_nsfw","type":"switch","prompt":"Include NSFW Posts","value":"off"},
-    {"name":"include_subreddit","type":"switch","prompt":"Show Subreddit Annotation","value":"on"},
-    {"name":"include_flair","type":"switch","prompt":"Show Flair Annotation","value":"on"},
+    {"name":"include_subreddit","type":"switch","prompt":"Show Subreddit","value":"on"},
+    {"name":"include_flair","type":"switch","prompt":"Show Flair","value":"on"},
     {"name":"initial_history","type":"choices","prompt":"Initial History","choices":"100,200,300","value":"100"}
   ]
 }

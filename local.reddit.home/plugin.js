@@ -12,8 +12,7 @@ function verify() {
   if (!url) { processError(Error("Paste the private JSON URL from Reddit's RSS feeds page.")); return; }
   requestListing(listingPageUrl(url, null)).then((listing) => {
     if (!Array.isArray(listing?.data?.children)) throw Error("This URL did not return a Reddit listing. Copy the JSON link, not the RSS link.");
-    const name = cleanFeedName();
-    processVerification({ displayName: name || "Reddit - Private Feed", icon: REDDIT_ICON, baseUrl: REDDIT_WEB });
+    processVerification({ displayName: feedDisplayName(), icon: REDDIT_ICON, baseUrl: REDDIT_WEB });
   }).catch(processError);
 }
 
@@ -44,6 +43,8 @@ function normalizedPrivateUrl() {
 }
 
 function cleanFeedName() { return typeof feed_name === "string" ? feed_name.trim() : ""; }
+function sourceLabel() { return cleanFeedName() || "Private Feed"; }
+function feedDisplayName() { return "Reddit · " + sourceLabel(); }
 
 function fetchListingPages(baseUrl, pageCount, conditional, targetCount) {
   const all = [];
@@ -138,12 +139,13 @@ function itemForData(item) {
   const uri = absoluteRedditUrl(item.permalink || ("/comments/" + (item.id || "")));
   const result = Item.createWithUriDate(uri, date);
   result.title = item.title || "Reddit post";
-  result.author = identityForPost(item);
   const body = htmlBodyForPost(item); if (body) result.body = body;
   const annotations = annotationsForPost(item); if (annotations.length) result.annotations = annotations;
   const attachments = attachmentsForPost(item); if (attachments.length) result.attachments = attachments;
   if (item.over_18 === true) result.contentWarning = "NSFW";
   else if (item.spoiler === true) result.contentWarning = "Spoiler";
+  // Assign author last — matches X/Threads Loom identity quirks.
+  result.author = identityForPost(item);
   return result;
 }
 
@@ -158,24 +160,30 @@ function identityForPost(item) {
 
 function annotationsForPost(item) {
   const annotations = [];
-  if (include_subreddit === "on" && item.subreddit_name_prefixed) {
-    const a = Annotation.createWithText(item.subreddit_name_prefixed);
+  const sub = include_subreddit === "on" ? (item.subreddit_name_prefixed || "") : "";
+  if (sub) {
+    const flair = include_flair === "on" && item.link_flair_text ? String(item.link_flair_text).trim() : "";
+    const text = flair ? flair + " in " + sub : sub;
+    const a = Annotation.createWithText(text);
     a.uri = REDDIT_WEB + "/r/" + encodeURIComponent(item.subreddit || "");
     annotations.push(a);
   }
-  if (include_flair === "on" && item.link_flair_text) annotations.push(Annotation.createWithText(item.link_flair_text));
   if (item.stickied === true) annotations.push(Annotation.createWithText("Pinned"));
   return annotations;
 }
 
-function htmlBodyForPost(item) {
-  let html = "";
-  if (item.selftext_html) html += absolutizeRedditHtml(decodeHtmlEntities(item.selftext_html));
+function metricsMetaHtml(item) {
   const metadata = [];
   if (typeof item.score === "number") metadata.push(formatNumber(item.score) + " points");
   if (typeof item.num_comments === "number") metadata.push(formatNumber(item.num_comments) + " comments");
   if (item.domain && !item.is_self) metadata.push(escapeHtml(item.domain));
-  if (metadata.length) html += "<p><small>" + metadata.join(" · ") + "</small></p>";
+  if (!metadata.length) return "";
+  return '<p class="reddit-meta-metrics"><small>' + metadata.join(" · ") + "</small></p>";
+}
+
+function htmlBodyForPost(item) {
+  let html = metricsMetaHtml(item);
+  if (item.selftext_html) html += absolutizeRedditHtml(decodeHtmlEntities(item.selftext_html));
   return html;
 }
 
