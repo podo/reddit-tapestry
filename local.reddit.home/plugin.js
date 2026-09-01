@@ -1,13 +1,19 @@
-// Reddit Private Feed for Tapestry
-// Uses Reddit's private JSON listing URLs from reddit.com/prefs/feeds.
+// Reddit for Tapestry — OAuth API feeds with optional private JSON URL fallback.
 
 const REDDIT_WEB = "https://www.reddit.com";
+const REDDIT_OAUTH = "https://oauth.reddit.com";
 const REDDIT_ICON = "https://www.redditstatic.com/desktop2x/img/favicon/apple-icon-180x180.png";
+const REDDIT_USER_AGENT = "web:local.reddit.home:8 (by /u/tapestry)";
 const PAGE_SIZE = 100;
 const AVATAR_LOOKUP_CAP = 8;
-const connectorBuildId = "reddit-private@plugin7@2.0.6";
+const connectorBuildId = "reddit@plugin8@2.1.0";
 
 function verify() {
+  if (usesPrivateFeedUrl()) verifyPrivateFeed();
+  else verifyOAuth();
+}
+
+function verifyPrivateFeed() {
   let url;
   try { url = normalizedPrivateUrl(); }
   catch (error) { processError(error); return; }
@@ -18,7 +24,20 @@ function verify() {
   }).catch(processError);
 }
 
+function verifyOAuth() {
+  requestReddit(REDDIT_OAUTH + "/api/v1/me").then((json) => {
+    const name = json?.name;
+    if (!name) throw Error("Reddit did not return account information after sign-in.");
+    processVerification({ displayName: feedDisplayName(), icon: REDDIT_ICON, baseUrl: REDDIT_WEB });
+  }).catch(processError);
+}
+
 function load() {
+  if (usesPrivateFeedUrl()) loadPrivateFeed();
+  else loadOAuthFeed();
+}
+
+function loadPrivateFeed() {
   const historyCount = clampInt(initial_history, 100, 300, 100);
   const firstLoad = getItem("reddit_private_initialized_v2") !== "1";
   let url;
@@ -34,6 +53,144 @@ function load() {
       processResults(results, true);
     });
   }).catch(processError);
+}
+
+function loadOAuthFeed() {
+  const historyCount = clampInt(initial_history, 100, 300, 100);
+  const firstLoad = getItem("reddit_oauth_initialized_v1") !== "1";
+  let baseUrl;
+  try { baseUrl = oauthListingBaseUrl(); }
+  catch (error) { processError(error); return; }
+  const pageLimit = firstLoad ? Math.max(1, Math.min(5, Math.ceil(historyCount / PAGE_SIZE) + 2)) : 1;
+  fetchListingPages(baseUrl, pageLimit, !firstLoad, historyCount).then((children) => {
+    if (children === null) { processResults(null, true); return; }
+    const results = itemsForChildren(children, historyCount);
+    return enrichAuthorAvatars(results).then(() => {
+      setItem("reddit_oauth_initialized_v1", "1");
+      processResults(results, true);
+    });
+  }).catch(processError);
+}
+
+function usesPrivateFeedUrl() { return !!privateFeedUrl(); }
+
+function privateFeedUrl() {
+  const siteUrl = typeof site === "string" ? site.trim() : "";
+  const legacyUrl = typeof private_feed_url === "string" ? private_feed_url.trim() : "";
+  const value = siteUrl || legacyUrl;
+  if (!value) return "";
+  if (!/^https:\/\/(www\.)?reddit\.com\/\.json(?:[?#]|$)/i.test(value)) return "";
+  if (!/(?:[?&])feed=[^&]+/i.test(value)) return "";
+  return value;
+}
+
+function cleanFeedSource() {
+  const value = typeof feed_source === "string" ? feed_source.trim().toLowerCase() : "home";
+  return value || "home";
+}
+
+function cleanSubredditName() {
+  const value = typeof subreddit_name === "string" ? subreddit_name.trim() : "";
+  return value.replace(/^r\//i, "");
+}
+
+function oauthListingPath() {
+  const source = cleanFeedSource();
+  switch (source) {
+    case "home":
+    case "hot":
+      return "/hot";
+    case "new":
+      return "/new";
+    case "best":
+      return "/best";
+    case "rising":
+      return "/rising";
+    case "saved":
+      return "/user/me/saved";
+    case "upvoted":
+      return "/user/me/upvoted";
+    case "hidden":
+      return "/user/me/hidden";
+    case "subreddit": {
+      const sub = cleanSubredditName();
+      if (!sub) throw Error("Enter a subreddit name when Feed is subreddit.");
+      return "/r/" + encodeURIComponent(sub) + "/hot";
+    }
+    default:
+      throw Error("Unsupported Reddit feed source: " + source);
+  }
+}
+
+function oauthListingBaseUrl() { return REDDIT_OAUTH + oauthListingPath(); }
+
+function defaultFeedLabel() {
+  if (usesPrivateFeedUrl()) return "Private Feed";
+  const source = cleanFeedSource();
+  switch (source) {
+    case "home": return "Home";
+    case "hot": return "Hot";
+    case "new": return "New";
+    case "best": return "Best";
+    case "rising": return "Rising";
+    case "saved": return "Saved";
+    case "upvoted": return "Upvoted";
+    case "hidden": return "Hidden";
+    case "subreddit": {
+      const sub = cleanSubredditName();
+      return sub ? "r/" + sub : "Subreddit";
+    }
+    default:
+      return "Home";
+  }
+}
+
+function redditRequestHeaders() {
+  return { "Accept": "application/json", "User-Agent": REDDIT_USER_AGENT };
+}
+
+function requestReddit(url, conditional) {
+  const request = conditional ? sendConditionalRequest : sendRequest;
+  return request(url, "GET", null, redditRequestHeaders(), true).then((raw) => parseRedditResponse(raw, usesPrivateFeedUrl()));
+}
+
+function parseRedditResponse(raw, privateMode) {
+  let response = raw;
+  if (typeof response === "string") response = JSON.parse(response);
+  const status = response?.status ?? 200;
+  const body = response?.body ?? response;
+  if (status === 304) return null;
+  if (status === 401) {
+    const title = privateMode ? "Private feed URL expired" : "Sign in to Reddit";
+    const message = privateMode
+      ? "Copy a fresh JSON URL from reddit.com/prefs/feeds and update this source."
+      : "Your Reddit session expired. Sign in again to refresh this feed.";
+    if (typeof raiseCondition === "function") raiseCondition(privateMode ? "disable" : "authorize", title, message);
+    throw Error(privateMode
+      ? "Reddit rejected this private feed URL. Copy a fresh JSON URL from reddit.com/prefs/feeds."
+      : "Reddit rejected this request. Sign in again to refresh your Reddit session.");
+  }
+  if (status === 403) {
+    const title = privateMode ? "Private feed URL expired" : "Reddit access denied";
+    const message = privateMode
+      ? "Copy a fresh JSON URL from reddit.com/prefs/feeds and update this source."
+      : "Reddit denied access to this feed. Check your OAuth scopes and feed settings.";
+    if (typeof raiseCondition === "function") raiseCondition(privateMode ? "disable" : "authorize", title, message);
+    throw Error(privateMode
+      ? "Reddit returned HTTP 403. The private URL may have expired, or Reddit may be blocking this request. Try again later or copy a fresh JSON URL."
+      : "Reddit returned HTTP 403 for this feed.");
+  }
+  if (status === 429) throw Error("Reddit rate limit reached. Try again later.");
+  if (status < 200 || status >= 300) throw Error("Reddit request failed with HTTP " + status + ".");
+  return typeof body === "string" ? JSON.parse(body) : body;
+}
+
+function normalizedPrivateUrl() {
+  const value = privateFeedUrl();
+  if (!value) return "";
+  if (!/^https:\/\/(www\.)?reddit\.com\/\.json(?:[?#]|$)/i.test(value)) throw Error("Paste an HTTPS private JSON URL from reddit.com/prefs/feeds.");
+  if (!/(?:[?&])feed=[^&]+/i.test(value)) throw Error("This Reddit URL is missing its private feed token.");
+  return value;
 }
 
 function performAction(actionId, actionValue, item) {
@@ -103,23 +260,14 @@ function commentItemForData(data, depth) {
   return item;
 }
 
-function normalizedPrivateUrl() {
-  const siteUrl = typeof site === "string" ? site.trim() : "";
-  const legacyUrl = typeof private_feed_url === "string" ? private_feed_url.trim() : "";
-  const value = siteUrl || legacyUrl;
-  if (!value) return "";
-  if (!/^https:\/\/(www\.)?reddit\.com\/\.json(?:[?#]|$)/i.test(value)) throw Error("Paste an HTTPS private JSON URL from reddit.com/prefs/feeds.");
-  if (!/(?:[?&])feed=[^&]+/i.test(value)) throw Error("This Reddit URL is missing its private feed token.");
-  return value;
-}
-
 function cleanFeedName() { return typeof feed_name === "string" ? feed_name.trim() : ""; }
 function sourceLabel() {
   const name = cleanFeedName();
-  if (!name) return "Private Feed";
-  // Old installs saved "Reddit - Private Feed" as feed_name; don't emit "Reddit · Reddit - …".
-  const stripped = name.replace(/^reddit(\s*[·\-–—:]\s*|\s+)/i, "").trim();
-  return stripped || "Private Feed";
+  if (name) {
+    const stripped = name.replace(/^reddit(\s*[·\-–—:]\s*|\s+)/i, "").trim();
+    if (stripped) return stripped;
+  }
+  return defaultFeedLabel();
 }
 function feedDisplayName() { return "Reddit · " + sourceLabel(); }
 
@@ -196,25 +344,7 @@ function setQueryParameter(url, key, value) {
 }
 
 function requestListing(url, conditional) {
-  const request = conditional ? sendConditionalRequest : sendRequest;
-  return request(url, "GET", null, { "Accept": "application/json" }, true).then((raw) => {
-    let response = raw;
-    if (typeof response === "string") response = JSON.parse(response);
-    const status = response?.status ?? 200;
-    const body = response?.body ?? response;
-    if (status === 304) return null;
-    if (status === 401 || status === 403) {
-      const title = "Private feed URL expired";
-      const message = "Copy a fresh JSON URL from reddit.com/prefs/feeds and update this source.";
-      if (typeof raiseCondition === "function") raiseCondition("disable", title, message);
-      throw Error(status === 401
-        ? "Reddit rejected this private feed URL. Copy a fresh JSON URL from reddit.com/prefs/feeds."
-        : "Reddit returned HTTP 403. The private URL may have expired, or Reddit may be blocking this request. Try again later or copy a fresh JSON URL.");
-    }
-    if (status === 429) throw Error("Reddit rate limit reached. Try again later.");
-    if (status < 200 || status >= 300) throw Error("Reddit private feed request failed with HTTP " + status + ".");
-    return typeof body === "string" ? JSON.parse(body) : body;
-  });
+  return requestReddit(url, conditional);
 }
 
 function itemForData(item) {

@@ -1,6 +1,8 @@
 {
   "inputs": [
-    {"name":"feed_name","type":"text","prompt":"Feed Type (optional)","placeholder":"Private Feed"},
+    {"name":"feed_source","type":"choices","prompt":"Feed","choices":"home,hot,new,best,rising,saved,upvoted,hidden,subreddit","value":"home"},
+    {"name":"subreddit_name","type":"text","prompt":"Subreddit (when Feed is subreddit)","placeholder":"technology"},
+    {"name":"feed_name","type":"text","prompt":"Feed Type (optional)","placeholder":"Home"},
     {"name":"include_nsfw","type":"switch","prompt":"Include NSFW Posts","value":"off"},
     {"name":"include_subreddit","type":"switch","prompt":"Show Subreddit","value":"on"},
     {"name":"include_flair","type":"switch","prompt":"Show Flair","value":"on"},
